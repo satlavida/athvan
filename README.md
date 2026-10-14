@@ -38,6 +38,8 @@ schedule is one glance away, no unlock needed.
 - **Preview page** to try every parameter live and copy the request as curl, JSON, a GET URL or
   an iOS Shortcut recipe.
 - **Generated OpenAPI 3.1 spec.** The server validates requests against the same schema.
+- **Invite-only access.** API keys are issued, revoked and monitored from an admin dashboard
+  (use counts, last used, 30-day activity).
 - **One self-contained binary.** Fonts, the preview page and timezone data are embedded.
 
 ## Quick start
@@ -49,10 +51,14 @@ git clone https://github.com/satlavida/athvan && cd athvan
 go run ./cmd/athvan            # http://localhost:8080
 ```
 
+With no admin configured the API is open, which is handy for local use. To make it
+invite-only, see [Access & API keys](#access--api-keys).
+
 Open <http://localhost:8080/> for the preview page, or render from the command line:
 
 ```sh
-curl -X POST localhost:8080/v1/wallpaper -H 'Content-Type: application/json' -o wall.png -d '{
+curl -X POST localhost:8080/v1/wallpaper -H 'Content-Type: application/json' -o wall.png \
+  -H "Authorization: Bearer $ATHVAN_KEY" -d '{
   "device": "iphone-16-pro",
   "timezone": "America/Los_Angeles",
   "background": { "type": "bing" },
@@ -74,13 +80,17 @@ Use `-addr :9000` or `PORT=9000` to change the port.
 | Method & path | Description |
 |---|---|
 | `GET /` | Preview page |
+| `GET /admin` | API key dashboard (see below) |
 | `POST /v1/wallpaper` | Render a wallpaper from a JSON body. Returns `image/png` or `image/jpeg` |
 | `GET /v1/wallpaper?config=…` | Same render; `config` is the body as base64url JSON. Good for a fixed bookmarkable look |
-| `GET /v1/devices` | Device presets: resolution, scale, default safe areas |
+| `GET /v1/devices` | Device presets: resolution, scale, default safe areas (no key needed) |
 | `GET /v1/bing?market=en-US&index=0` | Title, credit and URL of the Bing image |
 | `GET /docs` | Interactive API reference |
 | `GET /openapi.yaml` · `/openapi.json` | The OpenAPI 3.1 document |
 | `GET /healthz` | Liveness check |
+
+`/v1/wallpaper` and `/v1/bing` need an API key when keys are required. Without one they
+return `401`.
 
 Response headers on renders: `X-Athvan-Size`, `X-Athvan-Device`, `X-Athvan-Render-Ms`, and
 `X-Athvan-Bing-Credit` when a Bing photo was used. Bad input returns `422` with
@@ -117,6 +127,47 @@ The full schema with ranges and descriptions is in [`openapi.yaml`](openapi.yaml
 | `layout.top`, `layout.bottom` | device default | Fraction of the height kept clear (for the clock / bottom controls) |
 | `layout.margin`, `align`, `columns`, `width` | `16`, `top`, auto, full | Columns: auto picks 2 on screens ≥ 600 pt wide |
 
+## Access & API keys
+
+Athvan is meant to be **invite-only**. Set an admin username and password and the server
+starts requiring API keys:
+
+```sh
+ATHVAN_ADMIN_USER=you ATHVAN_ADMIN_PASSWORD='a long random password' go run ./cmd/athvan
+```
+
+Then open **`/admin`**, sign in, and use **Invite someone** to create a key. The dashboard:
+
+- shows a new key **once**. Only its SHA-256 hash is stored, so a lost key can't be recovered;
+  create a new one instead.
+- lists every key with its name, note, prefix, creation date, last use, total uses and a
+  30-day activity sparkline, plus totals for today, the last 30 days and all time
+- lets you **revoke** a key (it stops working immediately), **restore** it, or **delete**
+  revoked keys for good
+
+Clients send their key in one of three ways. Prefer a header, since URLs end up in logs.
+
+```
+Authorization: Bearer athv_…
+X-API-Key: athv_…
+GET /v1/wallpaper?config=…&key=athv_…
+```
+
+While you are signed in to `/admin`, the preview page works without a key. Other visitors
+paste their key into the preview page's toolbar; it is kept in that browser only.
+
+Keys are stored in `$ATHVAN_DATA_DIR/keys.json` (default `./data`). Changes to the key set
+are written immediately and usage counters every 5 seconds.
+
+**Security notes:**
+
+- Admin sessions use a random token in an `HttpOnly`, `SameSite=Strict` cookie, valid for
+  12 hours. Sessions are held in memory, so a restart signs you out.
+- State-changing admin requests must come from the same origin.
+- After 5 failed logins, an IP is locked out for 15 minutes.
+- Serve over HTTPS in production. The cookie is marked `Secure` behind TLS or when
+  `X-Forwarded-Proto: https` is set.
+
 ## Updating it every day (iOS Shortcuts)
 
 The preview page's **iOS Shortcut** tab shows this recipe already filled in with your current
@@ -128,7 +179,8 @@ settings.
 2. **Find Reminders** where *Is Not Completed* → the same, with `{title, due, priority, list}`.
 3. **Dictionary** holding your style settings, with `events` and `reminders` set to those
    lists.
-4. **Get Contents of URL** `https://your-host/v1/wallpaper`, Method *POST*, Request Body *JSON*.
+4. **Get Contents of URL** `https://your-host/v1/wallpaper`, Method *POST*, Request Body *JSON*,
+   Header `Authorization: Bearer <your key>`.
 5. **Set Wallpaper** → Lock Screen. Turn off *Show Preview* so it runs unattended.
 
 Trigger it from a **Personal Automation**, for example every morning at 6:00, or when you
@@ -154,29 +206,36 @@ go run ./cmd/athvan openapi -json                       # JSON to stdout
 
 ```sh
 docker build -t athvan .
-docker run -p 8080:8080 athvan
+docker run -p 8080:8080 -v athvan-data:/data \
+  -e ATHVAN_ADMIN_USER=you -e ATHVAN_ADMIN_PASSWORD='…' athvan
 ```
 
-The image is a static binary on distroless, running as non-root.
+The image is a static binary on distroless, running as non-root. Mount `/data` so keys
+survive container restarts.
 
 | Env var | Purpose |
 |---|---|
 | `PORT` | Listen port (default `8080`) |
+| `ATHVAN_ADMIN_USER`, `ATHVAN_ADMIN_PASSWORD` | Enable `/admin`. Once set, API keys are required |
+| `ATHVAN_REQUIRE_KEY` | `true`/`false` to override whether keys are required |
+| `ATHVAN_DATA_DIR` | Where `keys.json` is stored (default `./data`, `/data` in Docker) |
 | `ATHVAN_ALLOW_PRIVATE_URLS=1` | Let `image_url` reach loopback/private/link-local addresses. Off by default so a public deployment can't be used to probe its own network |
 
-There is no authentication. Put it behind a reverse proxy or a private network if you expose
-it.
+Exposing it publicly? Set the admin credentials so keys are required, and put it behind
+HTTPS.
 
 ## Development
 
 ```sh
-go test ./...                                   # renders every device × orientation, error cases, SSRF guard
+go test ./...                                   # every device × orientation, error cases, SSRF guard, keys, admin
 go test ./internal/render -bench Render -run ^$ # ~0.25 s per iPhone render
 ```
 
 ```
 cmd/athvan/         entry point: HTTP server and the `openapi` subcommand
-internal/api/       Huma operations; the source of the OpenAPI document
+internal/api/       Huma operations and key-auth middleware; the source of the OpenAPI document
+internal/keys/      API key store (hashed keys, usage counters, JSON file)
+internal/admin/     /admin dashboard: login, sessions, key management (not in the public spec)
 internal/render/    request model, normalisation, layout, drawing, backgrounds, Bing
 internal/devices/   iPhone / iPad presets and safe areas
 internal/web/       preview page (one embedded HTML file, no build step)

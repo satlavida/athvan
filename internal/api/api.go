@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"github.com/satlavida/athvan/internal/devices"
 	"github.com/satlavida/athvan/internal/render"
@@ -28,6 +29,14 @@ func Config() huma.Config {
 		"events, reminders and notes drawn on a photo, the Bing image of the day, a gradient or a " +
 		"solid colour.\n\nTypical use: an iOS Shortcut builds the JSON body from Calendar and " +
 		"Reminders, POSTs it to /v1/wallpaper, and passes the returned image to *Set Wallpaper*."
+	cfg.Info.Description += "\n\n**Authentication.** Access is invite-only: send the API key you were given as " +
+		"`Authorization: Bearer <key>`, as `X-API-Key: <key>`, or as the `key` query parameter " +
+		"(handy for GET URLs). Keys are issued from the admin dashboard."
+	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
+		"bearer":      {Type: "http", Scheme: "bearer", Description: "API key as a bearer token."},
+		"apiKey":      {Type: "apiKey", In: "header", Name: "X-API-Key", Description: "API key in a header."},
+		"apiKeyQuery": {Type: "apiKey", In: "query", Name: "key", Description: "API key in the query string. Prefer a header: URLs end up in logs."},
+	}
 	cfg.Servers = nil // relative to wherever it is served
 	cfg.DocsPath = "/docs"
 	cfg.OpenAPIPath = "/openapi"
@@ -85,8 +94,31 @@ var imageResponses = map[string]*huma.Response{
 	},
 }
 
+// keyAuth marks an operation as needing an API key (any one of the schemes).
+var keyAuth = []map[string][]string{{"bearer": {}}, {"apiKey": {}}, {"apiKeyQuery": {}}}
+
+// Authorizer decides whether a request to a key-protected operation may
+// proceed. It returns a non-nil error, used as the 401 message, to refuse.
+// A nil Authorizer lets everything through (used for spec generation).
+type Authorizer func(r *http.Request) error
+
 // Register adds every operation to api.
-func Register(api huma.API) {
+func Register(api huma.API, authorize Authorizer) {
+	// Middlewares apply to operations registered after this call.
+	api.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
+		if authorize == nil || len(ctx.Operation().Security) == 0 {
+			next(ctx)
+			return
+		}
+		r, _ := humago.Unwrap(ctx)
+		if err := authorize(r); err != nil {
+			ctx.SetHeader("WWW-Authenticate", `Bearer realm="athvan"`)
+			huma.WriteErr(api, ctx, http.StatusUnauthorized, err.Error())
+			return
+		}
+		next(ctx)
+	})
+
 	huma.Register(api, huma.Operation{
 		OperationID:  "render-wallpaper",
 		Method:       http.MethodPost,
@@ -96,7 +128,8 @@ func Register(api huma.API) {
 		Tags:         []string{"Wallpaper"},
 		MaxBodyBytes: 40 << 20, // room for a base64 photo
 		Responses:    imageResponses,
-		Errors:       []int{http.StatusUnprocessableEntity, http.StatusBadGateway},
+		Security:     keyAuth,
+		Errors:       []int{http.StatusUnauthorized, http.StatusUnprocessableEntity, http.StatusBadGateway},
 	}, func(ctx context.Context, in *WallpaperInput) (*WallpaperOutput, error) {
 		return renderWallpaper(ctx, in.Body)
 	})
@@ -109,7 +142,8 @@ func Register(api huma.API) {
 		Description: "Same as the POST, with the body passed as base64url JSON in `config`. Handy for a bookmark or a static configuration; use POST for daily data.",
 		Tags:        []string{"Wallpaper"},
 		Responses:   imageResponses,
-		Errors:      []int{http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusBadGateway},
+		Security:    keyAuth,
+		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusUnprocessableEntity, http.StatusBadGateway},
 	}, func(ctx context.Context, in *WallpaperGetInput) (*WallpaperOutput, error) {
 		var req render.WallpaperRequest
 		if in.Config != "" {
@@ -147,7 +181,8 @@ func Register(api huma.API) {
 		Summary:     "Bing image of the day",
 		Description: "Title, credit and URL of the Bing image used by `background.type: bing`.",
 		Tags:        []string{"Reference"},
-		Errors:      []int{http.StatusBadGateway},
+		Security:    keyAuth,
+		Errors:      []int{http.StatusUnauthorized, http.StatusBadGateway},
 	}, func(ctx context.Context, in *BingInput) (*BingOutput, error) {
 		meta, err := render.BingMeta(ctx, in.Market, in.Index)
 		if err != nil {

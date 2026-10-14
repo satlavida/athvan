@@ -119,6 +119,7 @@ main { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; min-heigh
   overflow: hidden; background: #000; box-shadow: 0 0 0 8px #1b1c1e, 0 0 0 9px #3a3b3e, 0 20px 50px rgb(0 0 0 / .35);
   container-type: size;
 }
+.device img:not([src]) { visibility: hidden; }
 .device img { display: block; width: 100%; height: 100%; object-fit: contain; transition: opacity .15s; }
 .device.loading img { opacity: .82; }
 .overlay { position: absolute; inset: 0; pointer-events: none; color: rgb(255 255 255 / .92); text-align: center; font-family: -apple-system, "SF Pro Display", Inter, sans-serif; }
@@ -164,7 +165,7 @@ main { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; min-heigh
 <aside>
   <header class="brand">
     <h1>Athvan</h1>
-    <nav><a href="/docs" target="_blank">API docs</a><a href="/openapi.yaml" target="_blank">openapi.yaml</a></nav>
+    <nav><a href="/docs" target="_blank">API docs</a><a href="/openapi.yaml" target="_blank">openapi.yaml</a><a href="/admin">Admin</a></nav>
   </header>
 
   <details open>
@@ -303,6 +304,7 @@ main { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; min-heigh
   <div class="toolbar">
     <label class="check" style="margin:0"><input type="checkbox" id="showLock" checked> Lock screen</label>
     <label class="check" style="margin:0"><input type="checkbox" id="showSafe"> Safe areas</label>
+    <input type="password" id="apiKey" placeholder="API key" autocomplete="off" spellcheck="false" style="width:200px" title="Your invite key. Stored in this browser only. Not needed when signed in at /admin.">
     <button class="btn primary" id="download">Download</button>
     <span class="status" id="status">…</span>
   </div>
@@ -364,6 +366,10 @@ try {
   if (saved) state = merge(structuredClone(DEFAULTS), saved);
 } catch {}
 let devices = [];
+const KEY_STORE = "athvan.apikey";
+let apiKey = "";
+try { apiKey = localStorage.getItem(KEY_STORE) || ""; } catch {}
+const authHeaders = () => (apiKey ? { Authorization: "Bearer " + apiKey } : {});
 
 function merge(base, over) {
   for (const [k, v] of Object.entries(over || {})) {
@@ -610,9 +616,10 @@ async function renderImage() {
   const t0 = performance.now();
   try {
     const res = await fetch("/v1/wallpaper", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(buildRequest()), signal: inflight.signal,
     });
+    if (res.status === 401) throw new Error("API key required: paste your key in the field above, or sign in at /admin.");
     if (!res.ok) {
       const p = await res.json().catch(() => ({}));
       const detail = p.errors?.map((e) => `${e.location ?? ""} ${e.message}`.trim()).join("; ");
@@ -645,14 +652,14 @@ function renderCode() {
   $("#applyJson").classList.toggle("hidden", codeTab !== "json");
   hint.textContent = "";
   if (codeTab === "curl") {
-    out.textContent = `curl -sS -X POST '${origin}/v1/wallpaper' \\\n  -H 'Content-Type: application/json' \\\n  -o wallpaper.${state.format === "jpeg" ? "jpg" : "png"} \\\n  -d '${JSON.stringify(req).replace(/'/g, "'\\''")}'`;
+    out.textContent = `curl -sS -X POST '${origin}/v1/wallpaper' \\\n  -H 'Content-Type: application/json' \\\n  -H "Authorization: Bearer $ATHVAN_KEY" \\\n  -o wallpaper.${state.format === "jpeg" ? "jpg" : "png"} \\\n  -d '${JSON.stringify(req).replace(/'/g, "'\\''")}'`;
     if (req.background?.image_base64) hint.textContent = "The uploaded image is omitted here. Put the real base64 in the body, or use image_url.";
   } else if (codeTab === "json") {
     if (document.activeElement !== edit) edit.value = body;
     hint.textContent = "Edit the body and press Apply JSON to load it into the controls. Paste the JSON your Shortcut sends to debug it.";
   } else if (codeTab === "get") {
     const r = buildRequest(); delete r.background?.image_base64;
-    out.textContent = `${origin}/v1/wallpaper?config=${b64url(JSON.stringify(r))}`;
+    out.textContent = `${origin}/v1/wallpaper?config=${b64url(JSON.stringify(r))}&key=YOUR_API_KEY`;
     hint.textContent = "A fixed URL with everything baked in. Good for a static look; POST is better for daily events and reminders." + (state.background.image_base64 ? " The uploaded image is not included; use image_url." : "");
   } else {
     out.textContent = [
@@ -669,6 +676,7 @@ function renderCode() {
       body.split("\n").map((l) => "     " + l).join("\n"),
       "",
       `4. Get Contents of URL  ${origin}/v1/wallpaper  · Method POST · Request Body JSON (the dictionary)`,
+      "   Headers: Authorization = Bearer YOUR_API_KEY",
       "5. Set Wallpaper → Lock Screen  (turn off “Show Preview” to run unattended; also turn off Legibility Blur)",
     ].join("\n");
     hint.textContent = "The server must be reachable from the phone. Deploy it, or use your Mac/PC's LAN address.";
@@ -766,7 +774,8 @@ async function bingInfo() {
   const key = state.background.bing_market + "/" + state.background.bing_index;
   if (key === bingKey) return; bingKey = key;
   try {
-    const r = await fetch(`/v1/bing?market=${encodeURIComponent(state.background.bing_market)}&index=${state.background.bing_index}`);
+    const r = await fetch(`/v1/bing?market=${encodeURIComponent(state.background.bing_market)}&index=${state.background.bing_index}`, { headers: authHeaders() });
+    if (r.status === 401) { bingKey = ""; $("#binginfo").textContent = "Needs an API key."; return; }
     const b = await r.json();
     $("#binginfo").textContent = r.ok ? `${b.title} — ${b.copyright}` : (b.detail || "Bing unavailable");
   } catch { $("#binginfo").textContent = "Bing unavailable"; }
@@ -782,6 +791,12 @@ async function bingInfo() {
   $("#sample").addEventListener("click", () => sample(false));
   $("#busy").addEventListener("click", () => sample(true));
   $("#clear").addEventListener("click", () => { Object.assign(state, { title: "", subtitle: "", events: [], reminders: [], notes: [] }); syncAll(); changed(); });
+  $("#apiKey").value = apiKey;
+  $("#apiKey").addEventListener("change", (e) => {
+    apiKey = e.target.value.trim();
+    try { apiKey ? localStorage.setItem(KEY_STORE, apiKey) : localStorage.removeItem(KEY_STORE); } catch {}
+    bingKey = ""; changed();
+  });
   $("#showLock").addEventListener("change", (e) => $("#overlay").classList.toggle("hidden", !e.target.checked));
   $("#showSafe").addEventListener("change", (e) => { $("#safeTop").classList.toggle("hidden", !e.target.checked); $("#safeBottom").classList.toggle("hidden", !e.target.checked); });
   $("#download").addEventListener("click", () => {

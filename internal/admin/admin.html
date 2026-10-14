@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Athvan Admin</title>
+<style>
+:root {
+  --bg: #f4f4f2; --panel: #ffffff; --ink: #17181a; --muted: #6b6e73; --line: #e3e3df;
+  --field: #f7f7f5; --accent: #2a63e8; --accent-ink: #fff; --danger: #c62d22; --ok: #1f8a4c;
+  --warn-bg: #fff6dd; --warn-line: #ecd68f;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111214; --panel: #18191c; --ink: #ececec; --muted: #9a9ca1; --line: #2a2c30;
+    --field: #202226; --accent: #6d97ff; --accent-ink: #0d1020; --danger: #ff7a70; --ok: #5bd08b;
+    --warn-bg: #2b2513; --warn-line: #5c4d1f;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 60px; }
+header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+header h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+header .sp { flex: 1; }
+header a { color: var(--muted); text-decoration: none; font-size: 13px; }
+header a:hover { color: var(--ink); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.stat .n { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.stat .l { color: var(--muted); font-size: 12px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 12px; }
+form.create { display: grid; grid-template-columns: 1fr 1.6fr auto; gap: 10px; align-items: end; }
+label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+input[type=text], input[type=password] {
+  width: 100%; background: var(--field); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 7px; padding: 8px 10px; font: inherit;
+}
+input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button {
+  border: 1px solid var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: 13px;
+  padding: 7px 12px; border-radius: 7px; cursor: pointer; white-space: nowrap;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+button.danger { color: var(--danger); }
+button.confirm { background: var(--danger); color: #fff; border-color: transparent; }
+.secret { margin-top: 14px; background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px; padding: 12px 14px; }
+.secret code { display: block; font: 13px/1.5 var(--mono); word-break: break-all; margin: 6px 0 10px; user-select: all; }
+.secret p { margin: 0; font-size: 13px; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); }
+td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; text-align: right; }
+th.num { text-align: right; }
+.name { font-weight: 600; }
+.note { color: var(--muted); font-size: 12px; }
+.prefix { font: 12px var(--mono); color: var(--muted); }
+.badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
+.badge.on { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.badge.off { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+tr.revoked td:not(:last-child) { opacity: .55; }
+.actions { display: flex; gap: 6px; justify-content: flex-end; }
+.spark { display: block; }
+.spark rect { fill: var(--accent); }
+.empty { color: var(--muted); text-align: center; padding: 30px 0; }
+.login { max-width: 360px; margin: 12vh auto 0; }
+.login form { display: grid; gap: 12px; }
+.err { color: var(--danger); font-size: 13px; min-height: 1.2em; margin: 0; }
+.hint { color: var(--muted); font-size: 13px; }
+.hidden { display: none !important; }
+.tablewrap { overflow-x: auto; }
+@media (max-width: 760px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  form.create { grid-template-columns: 1fr; }
+  .hide-sm { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <section id="disabled" class="card login hidden">
+    <h1 style="font-size:17px;margin:0 0 8px">Admin is disabled</h1>
+    <p class="hint">Set <code>ATHVAN_ADMIN_USER</code> and <code>ATHVAN_ADMIN_PASSWORD</code> in the server's environment and restart it. While admin is disabled the API does not require keys.</p>
+  </section>
+
+  <section id="login" class="card login hidden">
+    <h1 style="font-size:17px;margin:0 0 14px">Athvan admin</h1>
+    <form id="loginForm">
+      <label>Username <input type="text" id="user" autocomplete="username" required></label>
+      <label>Password <input type="password" id="pass" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">Sign in</button>
+      <p class="err" id="loginErr"></p>
+    </form>
+  </section>
+
+  <section id="app" class="hidden">
+    <header>
+      <h1>Athvan · API keys</h1>
+      <span class="sp"></span>
+      <a href="/">Preview</a>
+      <a href="/docs">API docs</a>
+      <button id="logout">Sign out</button>
+    </header>
+
+    <div class="stats">
+      <div class="card stat"><div class="n" id="sActive">–</div><div class="l">Active keys</div></div>
+      <div class="card stat"><div class="n" id="sToday">–</div><div class="l">Requests today (UTC)</div></div>
+      <div class="card stat"><div class="n" id="s30">–</div><div class="l">Requests, last 30 days</div></div>
+      <div class="card stat"><div class="n" id="sTotal">–</div><div class="l">Requests, all time</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <h2>Invite someone</h2>
+      <form class="create" id="createForm">
+        <label>Name <input type="text" id="kName" maxlength="80" placeholder="e.g. Priya's iPhone" required></label>
+        <label>Note <input type="text" id="kNote" maxlength="300" placeholder="Contact, purpose… (optional)"></label>
+        <button class="primary" type="submit">Create key</button>
+      </form>
+      <p class="err" id="createErr"></p>
+      <div class="secret hidden" id="secretBox">
+        <p><strong>Copy this key now.</strong> It is stored only as a hash and will not be shown again.</p>
+        <code id="secret"></code>
+        <button id="copySecret">Copy key</button>
+        <button id="hideSecret">Done</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Keys</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr>
+            <th>Name</th><th class="hide-sm">Key</th><th class="hide-sm">Created</th><th>Last used</th>
+            <th class="num">Uses</th><th class="hide-sm">Last 30 days</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="empty hidden" id="empty">No keys yet. Create one above and send it to whoever you're inviting.</p>
+    </div>
+    <p class="hint" style="margin-top:14px">Clients send the key as <code>Authorization: Bearer &lt;key&gt;</code>, <code>X-API-Key: &lt;key&gt;</code>, or <code>?key=&lt;key&gt;</code>. Counts are written to disk every few seconds.</p>
+  </section>
+</div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const show = (id) => ["#disabled", "#login", "#app"].forEach((x) => $(x).classList.toggle("hidden", x !== id));
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { const e = new Error(body.error || res.statusText); e.status = res.status; throw e; }
+  return body;
+}
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const dayKey = (d) => d.toISOString().slice(0, 10);
+function ago(iso) {
+  if (!iso) return "never";
+  const s = (Date.now() - new Date(iso)) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + " min ago";
+  if (s < 86400) return Math.floor(s / 3600) + " h ago";
+  if (s < 86400 * 30) return Math.floor(s / 86400) + " d ago";
+  return new Date(iso).toLocaleDateString();
+}
+const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+function last30(daily) {
+  const out = [];
+  for (let i = 29; i >= 0; i--) { const d = new Date(); d.setUTCDate(d.getUTCDate() - i); out.push(daily?.[dayKey(d)] || 0); }
+  return out;
+}
+function spark(vals) {
+  const max = Math.max(1, ...vals), w = 3, gap = 1, h = 22;
+  const bars = vals.map((v, i) => {
+    const bh = v ? Math.max(2, (v / max) * h) : 1;
+    return `<rect x="${i * (w + gap)}" y="${h - bh}" width="${w}" height="${bh}" rx="1" opacity="${v ? 1 : 0.25}"><title>${v}</title></rect>`;
+  }).join("");
+  return `<svg class="spark" width="${vals.length * (w + gap)}" height="${h}" aria-label="Daily uses, last 30 days">${bars}</svg>`;
+}
+
+let keys = [];
+async function load() {
+  keys = (await api("/admin/api/keys")).keys;
+  const today = dayKey(new Date());
+  let active = 0, t = 0, d30 = 0, total = 0;
+  for (const k of keys) {
+    if (!k.revoked_at) active++;
+    t += k.daily?.[today] || 0;
+    d30 += last30(k.daily).reduce((a, b) => a + b, 0);
+    total += k.uses;
+  }
+  $("#sActive").textContent = active; $("#sToday").textContent = t.toLocaleString();
+  $("#s30").textContent = d30.toLocaleString(); $("#sTotal").textContent = total.toLocaleString();
+  $("#empty").classList.toggle("hidden", keys.length > 0);
+  $("#rows").innerHTML = keys.map((k) => `
+    <tr class="${k.revoked_at ? "revoked" : ""}" data-id="${esc(k.id)}">
+      <td><div class="name">${esc(k.name)}</div>${k.note ? `<div class="note">${esc(k.note)}</div>` : ""}</td>
+      <td class="hide-sm"><span class="prefix">${esc(k.prefix)}…</span></td>
+      <td class="hide-sm">${fmtDate(k.created_at)}</td>
+      <td title="${k.last_used_at ? new Date(k.last_used_at).toLocaleString() : ""}">${ago(k.last_used_at)}</td>
+      <td class="num">${k.uses.toLocaleString()}</td>
+      <td class="hide-sm">${spark(last30(k.daily))}</td>
+      <td>${k.revoked_at ? `<span class="badge off" title="Revoked ${new Date(k.revoked_at).toLocaleString()}">Revoked</span>` : `<span class="badge on">Active</span>`}</td>
+      <td><div class="actions">${k.revoked_at
+        ? `<button data-act="restore">Restore</button><button class="danger" data-act="delete">Delete</button>`
+        : `<button class="danger" data-act="revoke">Revoke</button>`}</div></td>
+    </tr>`).join("");
+}
+
+// Destructive actions take two clicks instead of a blocking confirm().
+$("#rows").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const id = b.closest("tr").dataset.id, act = b.dataset.act;
+  if ((act === "revoke" || act === "delete") && !b.classList.contains("confirm")) {
+    b.classList.add("confirm"); b.textContent = act === "revoke" ? "Confirm revoke" : "Delete forever";
+    setTimeout(() => { if (b.isConnected) { b.classList.remove("confirm"); b.textContent = act[0].toUpperCase() + act.slice(1); } }, 3000);
+    return;
+  }
+  try {
+    if (act === "delete") await api(`/admin/api/keys/${encodeURIComponent(id)}`, { method: "DELETE" });
+    else await api(`/admin/api/keys/${encodeURIComponent(id)}/${act}`, { method: "POST" });
+    await load();
+  } catch (err) { if (err.status === 401) show("#login"); else alertErr(err); }
+});
+const alertErr = (err) => { $("#createErr").textContent = err.message; };
+
+$("#createForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#createErr").textContent = "";
+  try {
+    const r = await api("/admin/api/keys", { method: "POST", body: JSON.stringify({ name: $("#kName").value, note: $("#kNote").value }) });
+    $("#secret").textContent = r.secret;
+    $("#secretBox").classList.remove("hidden");
+    $("#kName").value = ""; $("#kNote").value = "";
+    await load();
+  } catch (err) { if (err.status === 401) show("#login"); else alertErr(err); }
+});
+$("#copySecret").addEventListener("click", async () => {
+  await navigator.clipboard.writeText($("#secret").textContent);
+  $("#copySecret").textContent = "Copied"; setTimeout(() => ($("#copySecret").textContent = "Copy key"), 1500);
+});
+$("#hideSecret").addEventListener("click", () => { $("#secret").textContent = ""; $("#secretBox").classList.add("hidden"); });
+
+$("#loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#loginErr").textContent = "";
+  try {
+    await api("/admin/api/login", { method: "POST", body: JSON.stringify({ username: $("#user").value, password: $("#pass").value }) });
+    $("#pass").value = "";
+    await boot();
+  } catch (err) { $("#loginErr").textContent = err.message; }
+});
+$("#logout").addEventListener("click", async () => { await api("/admin/api/logout", { method: "POST" }).catch(() => {}); show("#login"); });
+
+async function boot() {
+  try {
+    await api("/admin/api/me");
+    show("#app");
+    await load();
+  } catch (err) {
+    show(err.status === 503 ? "#disabled" : "#login");
+  }
+}
+boot();
+setInterval(() => { if (!$("#app").classList.contains("hidden") && document.visibilityState === "visible") load().catch(() => {}); }, 15000);
+</script>
+</body>
+</html>

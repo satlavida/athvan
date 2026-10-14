@@ -6,7 +6,8 @@ reminders and notes drawn on top. README.md has the user-facing docs.
 ## Commands
 
 ```sh
-go run ./cmd/athvan -addr 127.0.0.1:8787    # serve; preview page at /
+go run ./cmd/athvan -addr 127.0.0.1:8787    # serve; preview at /, API open (no admin set)
+ATHVAN_ADMIN_USER=admin ATHVAN_ADMIN_PASSWORD=... ATHVAN_DATA_DIR=/tmp/athvan go run ./cmd/athvan   # keys required; /admin
 go test ./...                               # ~15 s: renders every device × orientation
 go test ./internal/render -bench Render -run ^$
 go vet ./... && gofmt -l .
@@ -32,6 +33,17 @@ go generate ./...                           # regenerate openapi.yaml; run after
 - `internal/api/api.go`: Huma operations. Maps `render.InputError` → 422 and
   `render.UpstreamError` → 502. Adds the device-id enum to the schema after registration
   because the list lives in Go.
+- `internal/keys`: invite-only API keys in `$ATHVAN_DATA_DIR/keys.json`. Only the SHA-256
+  of a key is stored. `Verify` records usage in memory and `Run` flushes it every 5 s;
+  create/revoke/delete write immediately (atomic temp-file + rename).
+- `internal/admin`: `/admin` dashboard (`admin.html`) and its JSON API under `/admin/api/`.
+  Env username/password, in-memory session tokens in an HttpOnly SameSite=Strict cookie,
+  same-origin check on writes, per-IP login lockout. Deliberately **not** registered with
+  Huma, so it stays out of the public OpenAPI document.
+- Auth wiring is in `cmd/athvan/main.go`. An `api.Authorizer` is passed to `api.Register`,
+  whose Huma middleware enforces it on operations that declare `Security: keyAuth`. Keys are
+  required iff admin credentials are set (override with `ATHVAN_REQUIRE_KEY`). A valid
+  admin session counts as authorised, so the preview page works for the admin without a key.
 - `internal/devices`: presets. Pixel sizes are native portrait; `Scale` is px per point;
   `SafeTop`/`SafeBottom` are fractions of the height kept clear for the iOS clock and buttons.
 - `internal/web/index.html`: the preview page, a single embedded file of vanilla JS with no
@@ -58,3 +70,8 @@ go generate ./...                           # regenerate openapi.yaml; run after
   Run `gofmt -w` afterwards.
 - After changing anything in `spec.go` or `api.go`, run `go generate ./...` and commit the
   updated `openapi.yaml`.
+- New public operations that cost anything (rendering, outbound fetches) must set
+  `Security: keyAuth` and list `http.StatusUnauthorized` in `Errors`.
+- The preview and admin pages are embedded with `go:embed`. Rebuild the binary after editing
+  them; a running server keeps serving the old copy.
+- Never commit `data/` (real keys.json). It's in `.gitignore`.
